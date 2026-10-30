@@ -1,7 +1,7 @@
 variable "localisation" {
   type        = string
   description = "localisation des ressources dans Azure"
-  default     = "germanywestcentral"
+  default     = "swedencentral"
 }
 
 variable "environment" {

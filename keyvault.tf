@@ -6,6 +6,11 @@ resource "random_string" "kv_suffix" {
   length  = 5
   special = false
   upper   = false
+
+  # Nouveau suffixe si la région change : un Key Vault supprimé garde son nom réservé 7 jours
+  keepers = {
+    location = var.localisation
+  }
 }
 
 # 3. Déploiement d'Azure Key Vault (SKU Standard, économique pour étudiant)
