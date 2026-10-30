@@ -6,22 +6,26 @@ on:
   pull_request:
     branches: [ "main" ]
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
+# Aucun droit par défaut : chaque job déclare ce dont il a besoin
+permissions: {}
 
-env:
-  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+# Un seul run Terraform à la fois sur le state (pas d'annulation d'un apply en cours)
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
 
 jobs:
-  # PHASE 1 : CI (Contrôles statiques, SAST et Speculative Plan)
-  devsecops-ci:
-    name: "Lint, Scan & Speculative Plan"
+  # PHASE 1 : contrôles statiques sur un runner GitHub jetable, sans secret ni accès Azure
+  static-checks:
+    name: "Lint & SAST"
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      fmt: ${{ steps.fmt.outcome }}
+      init: ${{ steps.init.outcome }}
+      validate: ${{ steps.validate.outcome }}
+      trivy: ${{ steps.trivy.outcome }}
 
     steps:
       - name: Checkout Code
@@ -38,9 +42,9 @@ jobs:
         run: terraform fmt -check
         continue-on-error: true
 
-      - name: Terraform Init
+      - name: Terraform Init (sans backend)
         id: init
-        run: terraform init
+        run: terraform init -backend=false -input=false
         continue-on-error: true
 
       - name: Terraform Validate
@@ -58,10 +62,50 @@ jobs:
           severity: "HIGH,CRITICAL"
         continue-on-error: true
 
+      - name: Enforce Static Gating
+        if: steps.fmt.outcome == 'failure' || steps.init.outcome == 'failure' || steps.validate.outcome == 'failure' || steps.trivy.outcome == 'failure'
+        run: |
+          echo "❌ Le pipeline est bloqué : un ou plusieurs contrôles statiques ont échoué."
+          exit 1
+
+  # PHASE 2 : speculative plan sur le runner du VPS (seule IP autorisée par le Key Vault)
+  plan:
+    name: "Speculative Plan"
+    needs: static-checks
+    # Jamais pour une PR venant d'un fork (défense en profondeur : la vraie barrière est
+    # le réglage "Require approval for all external contributors" du repo)
+    if: >-
+      always() && needs.static-checks.result != 'cancelled' &&
+      (github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: [self-hosted, linux, vps-lab]
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        id: init
+        run: terraform init -input=false
+        continue-on-error: true
+
       - name: Terraform Plan
         id: plan
-        run: |
-          terraform plan -no-color -input=false > plan.txt 2>&1
+        if: steps.init.outcome == 'success'
+        run: terraform plan -no-color -input=false > plan.txt 2>&1
         continue-on-error: true
 
       - name: Post or Update PR Comment
@@ -82,10 +126,10 @@ jobs:
               planOutput = planOutput.substring(0, 60000) + '\n... [Plan tronqué : dépassement de la limite GitHub]';
             }
 
-            const fmtStatus = '${{ steps.fmt.outcome }}' === 'success' ? '✅ Conforme' : '❌ Non conforme';
+            const fmtStatus = '${{ needs.static-checks.outputs.fmt }}' === 'success' ? '✅ Conforme' : '❌ Non conforme';
             const initStatus = '${{ steps.init.outcome }}' === 'success' ? '✅ Succès' : '❌ Échec';
-            const validateStatus = '${{ steps.validate.outcome }}' === 'success' ? '✅ Valide' : '❌ Invalide';
-            const trivyStatus = '${{ steps.trivy.outcome }}' === 'success' ? '✅ Conforme (0 vulnérabilité critique)' : '❌ Vulnérabilités détectées';
+            const validateStatus = '${{ needs.static-checks.outputs.validate }}' === 'success' ? '✅ Valide' : '❌ Invalide';
+            const trivyStatus = '${{ needs.static-checks.outputs.trivy }}' === 'success' ? '✅ Conforme (0 vulnérabilité critique)' : '❌ Vulnérabilités détectées';
             const planStatus = '${{ steps.plan.outcome }}' === 'success' ? '✅ Plan généré' : '❌ Erreur de plan';
 
             const body = `### 🛡️ Rapport DevSecOps CI
@@ -108,7 +152,7 @@ jobs:
 
             *Déclenché par @${context.actor} sur le commit \`${context.sha.substring(0, 7)}\`*`;
 
-            const { data: comments } = await github.rest.issues.listComments({
+            const comments = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
@@ -134,33 +178,42 @@ jobs:
               });
             }
 
-      - name: Enforce Pipeline Gating
-        if: steps.fmt.outcome == 'failure' || steps.init.outcome == 'failure' || steps.validate.outcome == 'failure' || steps.trivy.outcome == 'failure' || steps.plan.outcome == 'failure'
+      - name: Remove Plan Output
+        if: always()
+        run: rm -f plan.txt
+
+      - name: Enforce Plan Gating
+        if: needs.static-checks.result != 'success' || steps.init.outcome != 'success' || steps.plan.outcome != 'success'
         run: |
-          echo "❌ Le pipeline est bloqué : un ou plusieurs contrôles ont échoué."
+          echo "❌ Le pipeline est bloqué : contrôles statiques, init ou plan en échec."
           exit 1
 
-
-  # PHASE 2 : CD (Déploiement effectif sur Azure)
-
-  devsecops-cd:
+  # PHASE 3 : CD (déploiement effectif sur Azure), uniquement sur push vers main
+  apply:
     name: "Continuous Delivery (Terraform Apply)"
-    needs: devsecops-ci
+    needs: [static-checks, plan]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, vps-lab]
+    permissions:
+      contents: read
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "1.17.1"
           terraform_wrapper: false
 
       - name: Terraform Init
-        run: terraform init
+        run: terraform init -input=false
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve -no-color
+        run: terraform apply -auto-approve -no-color -input=false
