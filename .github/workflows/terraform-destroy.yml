@@ -1,0 +1,58 @@
+name: "Terraform Destroy"
+
+# Déclenchement manuel uniquement : Actions > Terraform Destroy > Run workflow
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Tape 'destroy' pour confirmer la suppression de toute l'infrastructure"
+        required: true
+        type: string
+
+permissions: {}
+
+# Même groupe que le pipeline CI/CD : jamais de destroy en parallèle d'un apply
+concurrency:
+  group: terraform-state
+  cancel-in-progress: false
+
+jobs:
+  destroy:
+    name: "Terraform Destroy"
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, linux, vps-lab]
+    permissions:
+      contents: read
+    env:
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
+    steps:
+      - name: Check Confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "destroy" ]; then
+            echo "❌ Confirmation invalide : tape exactement 'destroy'. Rien n'a été supprimé."
+            exit 1
+          fi
+
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init -input=false
+
+      - name: Terraform Plan Destroy
+        run: terraform plan -destroy -no-color -input=false
+
+      - name: Terraform Destroy
+        run: terraform destroy -auto-approve -no-color -input=false
