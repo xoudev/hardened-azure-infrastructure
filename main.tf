@@ -38,7 +38,7 @@ resource "azurerm_network_security_group" "nsg_private" {
     source_address_prefix      = "Internet"
     destination_address_prefix = "*"
   }
-  
+
 
   tags = azurerm_resource_group.rg.tags
 }
