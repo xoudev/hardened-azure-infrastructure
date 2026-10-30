@@ -1,0 +1,17 @@
+# Répertoires de configuration et plugins
+.terraform/
+.terraform.lock.hcl
+
+# Fichiers d'état (State) - NE JAMAIS COMMITER
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Fichiers de variables avec secrets potentiels
+*.tfvars
+*.tfvars.json
+
+# Fichiers de crash et d'exécution
+crash.log
+*.log
+*.tfplan
