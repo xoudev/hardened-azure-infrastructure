@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  issues: write
 
 jobs:
   devsecops-pipeline:
@@ -23,33 +24,117 @@ jobs:
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        uses: actions/checkout@v4
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: "1.17.1"
+          terraform_version: "1.9.0"
+          terraform_wrapper: false
 
       - name: Terraform Format Check
         id: fmt
         run: terraform fmt -check
+        continue-on-error: true
 
       - name: Terraform Init
         id: init
         run: terraform init
+        continue-on-error: true
 
       - name: Terraform Validate
         id: validate
         run: terraform validate -no-color
+        continue-on-error: true
 
       - name: Run Trivy IaC Security Scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        id: trivy
+        uses: aquasecurity/trivy-action@0.28.0
         with:
           scan-type: "config"
           scan-ref: "."
           exit-code: "1"
           severity: "HIGH,CRITICAL"
+        continue-on-error: true
 
       - name: Terraform Plan
         id: plan
-        run: terraform plan -no-color
+        run: |
+          terraform plan -no-color > plan.txt 2>&1
+        continue-on-error: true
+
+      - name: Post or Update PR Comment
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const fs = require('fs');
+            let planOutput = '';
+            try {
+              planOutput = fs.readFileSync('plan.txt', 'utf8');
+            } catch (e) {
+              planOutput = 'Aucun journal de plan disponible.';
+            }
+
+            if (planOutput.length > 60000) {
+              planOutput = planOutput.substring(0, 60000) + '\n... [Plan tronqué : dépassement de la limite GitHub]';
+            }
+
+            const fmtStatus = '${{ steps.fmt.outcome }}' === 'success' ? '✅ Conforme' : '❌ Non conforme';
+            const initStatus = '${{ steps.init.outcome }}' === 'success' ? '✅ Succès' : '❌ Échec';
+            const validateStatus = '${{ steps.validate.outcome }}' === 'success' ? '✅ Valide' : '❌ Invalide';
+            const trivyStatus = '${{ steps.trivy.outcome }}' === 'success' ? '✅ Conforme (0 vulnérabilité critique)' : '❌ Vulnérabilités détectées';
+            const planStatus = '${{ steps.plan.outcome }}' === 'success' ? '✅ Plan généré' : '❌ Erreur de plan';
+
+            const body = `### 🛡️ Rapport DevSecOps CI
+
+            | Contrôle de conformité | Statut |
+            | :--- | :--- |
+            | 🖌️ **Formatage (\`terraform fmt\`)** | ${fmtStatus} |
+            | ⚙️ **Initialisation (\`terraform init\`)** | ${initStatus} |
+            | 🔍 **Syntaxe (\`terraform validate\`)** | ${validateStatus} |
+            | 🚨 **Sécurité SAST (Trivy)** | ${trivyStatus} |
+            | 📋 **Speculative Plan** | ${planStatus} |
+
+            <details><summary>📖 Afficher le résultat du <code>terraform plan</code></summary>
+
+            \`\`\`terraform
+            ${planOutput}
+            \`\`\`
+
+            </details>
+
+            *Déclenché par @${context.actor} sur le commit \`${context.sha.substring(0, 7)}\`*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' && comment.body.includes('### 🛡️ Rapport DevSecOps CI')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
+
+      - name: Enforce Pipeline Gating
+        if: steps.fmt.outcome == 'failure' || steps.init.outcome == 'failure' || steps.validate.outcome == 'failure' || steps.trivy.outcome == 'failure' || steps.plan.outcome == 'failure'
+        run: |
+          echo "❌ Le pipeline est bloqué : un ou plusieurs contrôles ont échoué."
+          exit 1
