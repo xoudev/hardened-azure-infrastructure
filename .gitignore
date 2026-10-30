@@ -1,6 +1,6 @@
 # Répertoires de configuration et plugins
 .terraform/
-.terraform.lock.hcl
+# Le lock file (.terraform.lock.hcl) DOIT être commité : il fige les versions des providers
 
 # Fichiers d'état (State) - NE JAMAIS COMMITER
 *.tfstate

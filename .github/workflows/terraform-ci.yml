@@ -1,4 +1,4 @@
-name: "Terraform DevSecOps CI"
+name: "Terraform DevSecOps CI/CD"
 
 on:
   push:
@@ -11,16 +11,17 @@ permissions:
   pull-requests: write
   issues: write
 
+env:
+  ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+  ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+  ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+  ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+
 jobs:
-  devsecops-pipeline:
+  # PHASE 1 : CI (Contrôles statiques, SAST et Speculative Plan)
+  devsecops-ci:
     name: "Lint, Scan & Speculative Plan"
     runs-on: ubuntu-latest
-
-    env:
-      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
 
     steps:
       - name: Checkout Code
@@ -60,7 +61,7 @@ jobs:
       - name: Terraform Plan
         id: plan
         run: |
-          terraform plan -no-color > plan.txt 2>&1
+          terraform plan -no-color -input=false > plan.txt 2>&1
         continue-on-error: true
 
       - name: Post or Update PR Comment
@@ -138,3 +139,28 @@ jobs:
         run: |
           echo "❌ Le pipeline est bloqué : un ou plusieurs contrôles ont échoué."
           exit 1
+
+
+  # PHASE 2 : CD (Déploiement effectif sur Azure)
+
+  devsecops-cd:
+    name: "Continuous Delivery (Terraform Apply)"
+    needs: devsecops-ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e
+        with:
+          terraform_version: "1.17.1"
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve -no-color

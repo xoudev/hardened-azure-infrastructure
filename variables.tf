@@ -27,3 +27,9 @@ variable "private_subnet_cidr" {
   description = "CIDR de base pour les subnetworks"
   default     = ["10.0.1.0/24"]
 }
+
+variable "admin_ip_range" {
+  type        = list(string)
+  description = "Liste des ip admin"
+  default     = ["57.128.203.98/32"]
+}
