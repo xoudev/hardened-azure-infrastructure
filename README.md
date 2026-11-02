@@ -100,6 +100,9 @@ Durcissements du pipeline :
 - le workflow de destroy exige de taper `destroy`, la saisie passe par une variable d'environnement
   (pas d'interpolation directe dans le script, donc pas d'injection de commande)
 - le plan est supprimé du disque du runner en fin de job
+- **authentification à Azure par OIDC** (aucun secret stocké) : chaque job demande à GitHub un jeton de 5 minutes, et Azure ne l'accepte
+  que si son `sub` correspond à un *credential fédéré* (un pour `main`, un pour les pull requests). Les trois jobs Azure déclarent
+  `id-token: write` ; les autres jobs n'ont aucun accès à Azure
 
 ## Mesures de sécurité et pourquoi
 
@@ -123,7 +126,6 @@ Chaque risque est assumé, pas oublié. Ils sont aussi documentés dans le code.
 |---|---|---|
 | `purge_protection_enabled = false` sur le Key Vault | Le lab est détruit et recréé régulièrement : la protection bloquerait la réutilisation | À activer en production |
 | Mot de passe de la base présent dans le state | `random_password` écrit sa valeur dans le state. Le state est chiffré, privé, accessible par Entra ID uniquement | Remplacer par une authentification Entra sans mot de passe |
-| `ARM_CLIENT_SECRET` stocké dans GitHub | Étape intermédiaire du lab | Remplacer par OIDC (voir ci-dessous) |
 | `azurerm ~> 3.100` | Version de départ du lab | Migration vers la v4 prévue |
 | Key Vault en *access policies* | Plus simple à lire pour un premier déploiement | Passer en RBAC |
 | IP admin en valeur par défaut d'une variable | Pratique pour un lab mono-opérateur | Sortir en variable d'environnement ou secret |
@@ -151,6 +153,21 @@ Chaque risque est assumé, pas oublié. Ils sont aussi documentés dans le code.
 - Récupérer un runner en *SessionConflict* : deux machines ne doivent jamais partager la même identité de runner. Je l'ai rencontré en migrant le runner vers un nouveau serveur.
 - Le rôle d'un workflow de destruction manuel et confirmé pour maîtriser les coûts d'un lab cloud.
 
+**Identité et OIDC**
+- Remplacer un secret par une relation de confiance : GitHub signe un jeton de 5 minutes (`iss`, `aud`, `sub`), Azure vérifie la signature
+  puis **compare `sub` caractère pour caractère** au credential fédéré. Seuls `iss`, `aud` et `sub` comptent : toute la sécurité tient dans `sub`.
+- Le format de `sub` n'est pas celui des tutoriels : il embarque l'identifiant numérique du propriétaire et du dépôt
+  (`repo:<org>@<id>/<repo>@<id>:ref:refs/heads/main`). Je l'ai constaté en décodant un vrai jeton, pas en le déduisant.
+- Un test vert peut être trompeur : mon premier `plan` en « OIDC » utilisait encore le secret, car `ARM_USE_OIDC` n'était pas défini.
+  Seule la suppression du secret prouve que l'OIDC est réellement utilisé.
+- Une faute de frappe dans un nom de variable (`ARM_USE_OICD`) est ignorée sans erreur : le provider retombe silencieusement sur `az login`.
+
+**Terraform en conditions réelles**
+- Un attribut choisi par le cloud (la zone de disponibilité de PostgreSQL) crée un écart permanent si le provider ne le marque pas
+  *computed* : `lifecycle { ignore_changes }` documente que c'est voulu.
+- Une montée de version majeure du provider (`azurerm` 3 → 5) n'est pas une mise à jour : elle change le code. Dependabot est réglé pour
+  ne plus proposer les sauts majeurs, et la protection de `main` exige maintenant que la CI soit verte avant tout merge.
+
 **Méthode**
 - Une branche, une PR, une CI verte avant chaque merge, des commits au format Conventional Commits.
 - Casser volontairement une mesure pour vérifier qu'elle protège vraiment.
@@ -160,7 +177,7 @@ Chaque risque est assumé, pas oublié. Ils sont aussi documentés dans le code.
 Feuille de route, par ordre de priorité. L'objectif final : déployer l'API [`hardened-flask-app`](https://github.com/xoudev/hardened-flask-app)
 sur Azure **sans aucun mot de passe stocké nulle part**.
 
-- [ ] **Fédération OIDC GitHub → Entra ID** pour supprimer `ARM_CLIENT_SECRET` et tout secret longue durée dans GitHub
+- [x] ~~Fédération OIDC GitHub → Entra ID~~ : fait, plus aucun secret longue durée entre GitHub et Azure (voir « Ce que j'ai appris »)
 - [ ] Migration vers `azurerm` v4, nommage Cloud Adoption Framework (avec blocs `moved` pour renommer sans détruire), budget Azure et alerte de coût
 - [ ] `apply` du **plan sauvegardé**, derrière un environnement GitHub avec approbation manuelle
 - [ ] Identités managées et RBAC au moindre privilège (rôles intégrés, puis personnalisés)
