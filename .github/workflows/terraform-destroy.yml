@@ -21,6 +21,7 @@ jobs:
     name: "Terraform Destroy"
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, linux, vps-lab]
+    timeout-minutes: 45
     permissions:
       contents: read
     env:

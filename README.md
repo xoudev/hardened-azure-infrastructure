@@ -171,7 +171,7 @@ sur Azure **sans aucun mot de passe stocké nulle part**.
 - [ ] **Observabilité** : diagnostic settings, Log Analytics, requêtes KQL (qui a lu un secret ? quelles erreurs 5xx ?), alertes Azure Monitor
 - [ ] **Policy as code** : Azure Policy (tag `owner` obligatoire) et Conftest/OPA sur le plan Terraform
 - [ ] Modules Terraform réutilisables, `for_each`, tests (`terraform test`, tflint, checkov)
-- [ ] Protection de la branche `main`, commits signés, hooks `pre-commit`, Dependabot
+- [ ] Protection de la branche `main`, commits signés, hooks `pre-commit` (Dependabot est déjà actif sur Terraform et GitHub Actions)
 - [ ] Supply chain : SBOM, signature d'image (cosign), provenance SLSA
 - [ ] Threat model STRIDE de l'architecture finale et runbook d'incident
 - [ ] Remplacer le runner self-hosted persistant par un runner éphémère ou un accès privé au Key Vault
