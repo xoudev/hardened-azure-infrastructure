@@ -6,6 +6,15 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # Attendre 7 jours avant de proposer une version tout juste publiée (supply chain).
+    # Ne s'applique pas aux mises à jour de sécurité, qui restent immédiates.
+    cooldown:
+      default-days: 7
+    # Pas de saut de version majeure automatique : azurerm 3 -> 5 impose des changements dans le code
+    # (Key Vault, liens DNS...) et casse validate/plan. Migration à faire volontairement, branche dédiée.
+    ignore:
+      - dependency-name: "hashicorp/azurerm"
+        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: "chore(deps)"
 
@@ -14,5 +23,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    cooldown:
+      default-days: 7
     commit-message:
       prefix: "ci"
