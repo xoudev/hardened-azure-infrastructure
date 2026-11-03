@@ -15,5 +15,3 @@
 crash.log
 *.log
 *.tfplan
-
-/scripts
