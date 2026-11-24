@@ -7,10 +7,11 @@ resource "azurerm_virtual_network" "vnet" {
 }
 
 resource "azurerm_subnet" "snet_private" {
-  name                 = "snet-workload-private"
-  resource_group_name  = azurerm_resource_group.rg.name
-  virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = var.private_subnet_cidr
+  name                              = "snet-workload-private"
+  resource_group_name               = azurerm_resource_group.rg.name
+  virtual_network_name              = azurerm_virtual_network.vnet.name
+  address_prefixes                  = var.private_subnet_cidr
+  private_endpoint_network_policies = "Enabled"
 }
 
 resource "azurerm_network_security_group" "nsg_private" {
@@ -39,10 +40,12 @@ resource "azurerm_subnet_network_security_group_association" "private_sub_nsg_as
 }
 
 resource "azurerm_subnet" "subnet_db" {
-  name                 = "snet-db"
-  resource_group_name  = azurerm_resource_group.rg.name
-  virtual_network_name = azurerm_virtual_network.vnet.name
-  address_prefixes     = ["10.0.2.0/24"]
+  name                              = "snet-db"
+  resource_group_name               = azurerm_resource_group.rg.name
+  virtual_network_name              = azurerm_virtual_network.vnet.name
+  private_endpoint_network_policies = "Enabled"
+  address_prefixes                  = ["10.0.2.0/24"]
+  service_endpoints                 = ["Microsoft.Storage"]
   delegation {
     name = "fs-delegation"
     service_delegation {
