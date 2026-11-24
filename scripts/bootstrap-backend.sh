@@ -1,6 +1,6 @@
 #!/bin/bash
-RG_STATE="rg-secops-mgmt-germanywestcentral"
-LOCATION="germanywestcentral"
+RG_STATE="rg-secops-mgmt-polandcentral"
+LOCATION="polandcentral"
 
 # Génération d'un nom unique avec un hash court
 UNIQUE_ID=$(head /dev/urandom | tr -dc a-z0-9 | head -c 6)

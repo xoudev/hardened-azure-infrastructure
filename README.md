@@ -2,7 +2,7 @@
 
 [![Terraform CI/CD](https://github.com/xoudev/hardened-azure-infrastructure/actions/workflows/terraform-ci.yml/badge.svg)](https://github.com/xoudev/hardened-azure-infrastructure/actions/workflows/terraform-ci.yml)
 ![Terraform](https://img.shields.io/badge/Terraform-1.17-7B42BC?logo=terraform&logoColor=white)
-![Azure](https://img.shields.io/badge/Azure-northeurope-0078D4?logo=microsoftazure&logoColor=white)
+![Azure](https://img.shields.io/badge/Azure-polandcentral-0078D4?logo=microsoftazure&logoColor=white)
 
 Infrastructure Azure décrite en Terraform et livrée par un pipeline GitHub Actions, avec la sécurité
 intégrée à chaque étape : réseau privé, base de données sans IP publique, secrets dans Key Vault,
